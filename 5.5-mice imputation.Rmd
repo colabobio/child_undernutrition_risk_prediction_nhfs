@@ -1,0 +1,997 @@
+---
+title: "5.5 - MICE Imputation"
+author: "Justin Guerra"
+date: "2026-04-13"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+
+rm(list = ls())
+library(ggplot2)
+library(missForest)
+library(missMDA)
+library(magrittr)
+library(here) 
+library(dplyr)
+library(purrr)
+library(fastDummies)
+library(properties)
+library(miceRanger)
+library(doParallel)
+library(parallel)
+```
+
+```{r}
+prop <- read.properties("data.properties")
+data_folder <- prop$data_folder
+output_folder <- prop$output_folder
+```
+
+```{r}
+dffile <- here(data_folder, "cleaned.rda")
+load(file=dffile)
+dfc
+```
+
+
+
+
+
+
+```{r}
+############################################################
+### 0. Libraries
+############################################################
+
+library(dplyr)
+library(miceRanger)
+library(mitools)
+library(parallel)
+
+n_cores <- max(1, detectCores() - 1)
+
+############################################################
+### 1. DATA PREPROCESSING
+############################################################
+
+dfc <- dfc %>%
+  mutate(across(where(is.character), as.factor)) %>%
+  mutate(across(where(is.logical), as.integer))
+
+############################################################
+### 2. DATA SPLIT (NO CONSTANT REMOVAL)
+############################################################
+
+df_model <- dfc
+
+cat("Total variables used:", ncol(df_model), "\n")
+
+############################################################
+### 3. HYPERPARAMETER GRID
+############################################################
+
+grid <- expand.grid(
+  num.trees = c(25, 50, 100)
+)
+
+############################################################
+### 4. OUTPUT STORAGE + FOLDERS
+############################################################
+
+pooled_results <- list()
+all_results <- list()
+plot_list <- list()
+
+base_dir <- "C:/Users/justi/OneDrive/Desktop/Malnutrition_Project/infant_malnutrition_stratification/MICE Imputation Sensitivity analysis/"
+
+out_dir <- file.path(base_dir, "imputed_datasets")
+plot_dir <- file.path(base_dir, "model_error_plots")
+
+dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
+dir.create(plot_dir, recursive = TRUE, showWarnings = FALSE)
+
+############################################################
+### 5. SAFE PLOTTING FUNCTION
+############################################################
+
+safe_plot <- function(plot_expr, file_path) {
+
+  p <- tryCatch(
+    suppressWarnings(plot_expr),
+    error = function(e) {
+      cat("❌ Plot error:", e$message, "\n")
+      return(NULL)
+    }
+  )
+
+  if (is.null(p)) return(NULL)
+
+  print(p)
+
+  png(file_path, width = 2000, height = 2000)
+  print(p)
+  dev.off()
+
+  return(p)
+}
+
+############################################################
+### 6. LOOP OVER HYPERPARAMETERS
+############################################################
+
+for (i in seq_len(nrow(grid))) {
+
+  num_trees_val <- grid$num.trees[i]
+
+  cat("\n========================================\n")
+  cat("RUN:", i, "/", nrow(grid),
+      "| num.trees =", num_trees_val, "\n")
+
+  start_time <- Sys.time()
+
+  ##########################################################
+  ### IMPUTATION
+  ##########################################################
+
+  imp <- tryCatch({
+
+    miceRanger(
+      data = df_model,
+      m = 5,
+      num.trees = num_trees_val,
+      min.node.size = 5,
+      max.depth = 10,
+      sample.fraction = 0.632,
+      seed = 123,
+      verbose = FALSE,
+      num.threads = n_cores,
+      save.memory = TRUE
+    )
+
+  }, error = function(e) {
+    cat("❌ Imputation error:", e$message, "\n")
+    return(NULL)
+  })
+
+  if (is.null(imp)) next
+
+  ##########################################################
+  ### BASE PATH FOR PLOTS
+  ##########################################################
+
+  plot_prefix <- file.path(
+    plot_dir,
+    paste0("numtrees_", num_trees_val, "_minNodeSize5")
+  )
+
+  ##########################################################
+  ### 1. MODEL ERROR
+  ##########################################################
+
+  model_error_plot <- safe_plot(
+    plotModelError(imp),
+    paste0(plot_prefix, "_model_error.png")
+  )
+
+  ##########################################################
+  ### 2. DISTRIBUTIONS
+  ##########################################################
+
+  distributions_plot <- safe_plot(
+    plotDistributions(imp),
+    paste0(plot_prefix, "_distributions.png")
+  )
+
+  ##########################################################
+  ### 3. CORRELATIONS
+  ##########################################################
+
+  correlations_plot <- safe_plot(
+    plotCorrelations(imp),
+    paste0(plot_prefix, "_correlations.png")
+  )
+
+  ##########################################################
+  ### 4. VARIABLE CONVERGENCE
+  ##########################################################
+
+  var_convergence_plot <- safe_plot(
+    plotVarConvergence(imp),
+    paste0(plot_prefix, "_var_convergence.png")
+  )
+
+  ##########################################################
+  ### 5. IMPUTATION VARIANCE
+  ##########################################################
+
+  imputation_variance_plot <- safe_plot(
+    plotImputationVariance(imp),
+    paste0(plot_prefix, "_imputation_variance.png")
+  )
+
+  ##########################################################
+  ### STORE PLOTS
+  ##########################################################
+
+  plot_list[[i]] <- list(
+    model_error = model_error_plot,
+    distributions = distributions_plot,
+    correlations = correlations_plot,
+    var_convergence = var_convergence_plot,
+    imputation_variance = imputation_variance_plot
+  )
+
+  cat("📊 Plots saved for num.trees =", num_trees_val, "\n")
+
+  ##########################################################
+  ### EXTRACT IMPUTED DATASETS
+  ##########################################################
+
+  completed_list <- completeData(imp)
+
+  if (!is.list(completed_list)) {
+    completed_list <- list(completed_list)
+  }
+
+  ##########################################################
+  ### SAVE IMPUTED DATASETS
+  ##########################################################
+
+  for (j in seq_along(completed_list)) {
+
+    write.csv(
+      completed_list[[j]],
+      file.path(out_dir,
+                paste0("imputed_numtrees_", num_trees_val,
+                       "_dataset_", j,"_minNodeSize5", ".csv")),
+      row.names = FALSE
+    )
+  }
+
+  ##########################################################
+  ### SIMPLE MODEL (SENSITIVITY CHECK)
+  ##########################################################
+
+  vars <- names(df_model)[1:min(5, ncol(df_model))]
+
+  formula <- as.formula(
+    paste(vars[1], "~", paste(vars[-1], collapse = " + "))
+  )
+
+  models <- lapply(completed_list, function(data) {
+    lm(formula, data = data)
+  })
+
+  ##########################################################
+  ### POOL RESULTS
+  ##########################################################
+
+  pooled <- tryCatch({
+    MIcombine(models)
+  }, error = function(e) {
+    cat("❌ Pooling error:", e$message, "\n")
+    return(NULL)
+  })
+
+  if (is.null(pooled)) next
+
+  summary_pooled <- summary(pooled)
+  print(summary_pooled)
+
+  ##########################################################
+  ### STORE RESULTS
+  ##########################################################
+
+  pooled_results[[i]] <- list(
+    num.trees = num_trees_val,
+    summary = summary_pooled
+  )
+
+  all_results[[i]] <- list(
+    params = list(num.trees = num_trees_val),
+    imputed_datasets = completed_list,
+    plots = plot_list[[i]],
+    pooled_summary = summary_pooled,
+    models = models,
+    elapsed_time_sec = as.numeric(difftime(Sys.time(), start_time, units = "secs"))
+  )
+
+  ##########################################################
+  ### TIMING
+  ##########################################################
+
+  elapsed <- as.numeric(difftime(Sys.time(), start_time, units = "secs"))
+
+  cat("⏱ Elapsed:", round(elapsed, 2), "sec\n")
+  cat("========================================\n")
+}
+
+############################################################
+### 7. COMBINE RESULTS
+############################################################
+
+results_table <- do.call(rbind, lapply(pooled_results, function(res) {
+
+  if (is.null(res)) return(NULL)
+
+  data.frame(
+    num.trees = res$num.trees,
+    term = rownames(res$summary),
+    estimate = res$summary$results,
+    std_error = res$summary$se
+  )
+}))
+
+print(results_table)
+
+############################################################
+### 8. SAVE EVERYTHING
+############################################################
+
+saveRDS(all_results,
+        file = file.path(base_dir, "all_results_minNodeSize5.rds"))
+
+saveRDS(plot_list,
+        file = file.path(base_dir, "plot_list_minNodeSize5.rds"))
+
+############################################################
+### DONE
+############################################################
+
+cat("\n✅ FULL PIPELINE COMPLETE\n")
+```
+
+
+
+Min node size 10
+```{r}
+############################################################
+### 0. Libraries
+############################################################
+
+library(dplyr)
+library(miceRanger)
+library(mitools)
+library(parallel)
+
+n_cores <- max(1, detectCores() - 1)
+
+############################################################
+### 1. DATA PREPROCESSING
+############################################################
+
+dfc <- dfc %>%
+  mutate(across(where(is.character), as.factor)) %>%
+  mutate(across(where(is.logical), as.integer))
+
+############################################################
+### 2. DATA SPLIT (NO CONSTANT REMOVAL)
+############################################################
+
+df_model <- dfc
+
+cat("Total variables used:", ncol(df_model), "\n")
+
+############################################################
+### 3. HYPERPARAMETER GRID
+############################################################
+
+grid <- expand.grid(
+  num.trees = c(25, 50, 100)
+)
+
+############################################################
+### 4. OUTPUT STORAGE + FOLDERS
+############################################################
+
+pooled_results <- list()
+all_results <- list()
+plot_list <- list()
+
+base_dir <- "C:/Users/justi/OneDrive/Desktop/Malnutrition_Project/infant_malnutrition_stratification/MICE Imputation Sensitivity analysis min_nodes_size_10/"
+
+out_dir <- file.path(base_dir, "imputed_datasets_min_node_size_10")
+plot_dir <- file.path(base_dir, "model_error_plots_min_node_size_10")
+
+dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
+dir.create(plot_dir, recursive = TRUE, showWarnings = FALSE)
+
+############################################################
+### 5. SAFE PLOTTING FUNCTION
+############################################################
+
+safe_plot <- function(plot_expr, file_path) {
+
+  p <- tryCatch(
+    suppressWarnings(plot_expr),
+    error = function(e) {
+      cat("❌ Plot error:", e$message, "\n")
+      return(NULL)
+    }
+  )
+
+  if (is.null(p)) return(NULL)
+
+  print(p)
+
+  png(file_path, width = 2000, height = 2000)
+  print(p)
+  dev.off()
+
+  return(p)
+}
+
+############################################################
+### 6. LOOP OVER HYPERPARAMETERS
+############################################################
+
+for (i in seq_len(nrow(grid))) {
+
+  num_trees_val <- grid$num.trees[i]
+
+  cat("\n========================================\n")
+  cat("RUN:", i, "/", nrow(grid),
+      "| num.trees =", num_trees_val, "\n")
+
+  start_time <- Sys.time()
+
+  ##########################################################
+  ### IMPUTATION
+  ##########################################################
+
+  imp <- tryCatch({
+
+    miceRanger(
+      data = df_model,
+      m = 5,
+      num.trees = num_trees_val,
+      min.node.size = 10,
+      max.depth = 10,
+      sample.fraction = 0.632,
+      seed = 123,
+      verbose = FALSE,
+      num.threads = n_cores,
+      save.memory = TRUE
+    )
+
+  }, error = function(e) {
+    cat("❌ Imputation error:", e$message, "\n")
+    return(NULL)
+  })
+
+  if (is.null(imp)) next
+
+  ##########################################################
+  ### BASE PATH FOR PLOTS
+  ##########################################################
+
+  plot_prefix <- file.path(
+    plot_dir,
+    paste0("numtrees_", num_trees_val, "_minNodeSize10")
+  )
+
+  ##########################################################
+  ### 1. MODEL ERROR
+  ##########################################################
+
+  model_error_plot <- safe_plot(
+    plotModelError(imp),
+    paste0(plot_prefix, "_model_error_minNodeSize10.png")
+  )
+
+  ##########################################################
+  ### 2. DISTRIBUTIONS
+  ##########################################################
+
+  distributions_plot <- safe_plot(
+    plotDistributions(imp),
+    paste0(plot_prefix, "_distributions_minNodeSize10.png")
+  )
+
+  ##########################################################
+  ### 3. CORRELATIONS
+  ##########################################################
+
+  correlations_plot <- safe_plot(
+    plotCorrelations(imp),
+    paste0(plot_prefix, "_correlations_minNodeSize10.png")
+  )
+
+  ##########################################################
+  ### 4. VARIABLE CONVERGENCE
+  ##########################################################
+
+  var_convergence_plot <- safe_plot(
+    plotVarConvergence(imp),
+    paste0(plot_prefix, "_var_convergence_minNodeSize10.png")
+  )
+
+  ##########################################################
+  ### 5. IMPUTATION VARIANCE
+  ##########################################################
+
+  imputation_variance_plot <- safe_plot(
+    plotImputationVariance(imp),
+    paste0(plot_prefix, "_imputation_variance_minNodeSize10.png")
+  )
+
+  ##########################################################
+  ### STORE PLOTS
+  ##########################################################
+
+  plot_list[[i]] <- list(
+    model_error = model_error_plot,
+    distributions = distributions_plot,
+    correlations = correlations_plot,
+    var_convergence = var_convergence_plot,
+    imputation_variance = imputation_variance_plot
+  )
+
+  cat("📊 Plots saved for num.trees =", num_trees_val, "\n")
+
+  ##########################################################
+  ### EXTRACT IMPUTED DATASETS
+  ##########################################################
+
+  completed_list <- completeData(imp)
+
+  if (!is.list(completed_list)) {
+    completed_list <- list(completed_list)
+  }
+
+  ##########################################################
+  ### SAVE IMPUTED DATASETS
+  ##########################################################
+
+  for (j in seq_along(completed_list)) {
+
+    write.csv(
+      completed_list[[j]],
+      file.path(out_dir,
+                paste0("imputed_numtrees_", num_trees_val,
+                       "_dataset_", j,"_minNodeSize10", ".csv")),
+      row.names = FALSE
+    )
+  }
+
+  ##########################################################
+  ### SIMPLE MODEL (SENSITIVITY CHECK)
+  ##########################################################
+
+  vars <- names(df_model)[1:min(5, ncol(df_model))]
+
+  formula <- as.formula(
+    paste(vars[1], "~", paste(vars[-1], collapse = " + "))
+  )
+
+  models <- lapply(completed_list, function(data) {
+    lm(formula, data = data)
+  })
+
+  ##########################################################
+  ### POOL RESULTS
+  ##########################################################
+
+  pooled <- tryCatch({
+    MIcombine(models)
+  }, error = function(e) {
+    cat("❌ Pooling error:", e$message, "\n")
+    return(NULL)
+  })
+
+  if (is.null(pooled)) next
+
+  summary_pooled <- summary(pooled)
+  print(summary_pooled)
+
+  ##########################################################
+  ### STORE RESULTS
+  ##########################################################
+
+  pooled_results[[i]] <- list(
+    num.trees = num_trees_val,
+    summary = summary_pooled
+  )
+
+  all_results[[i]] <- list(
+    params = list(num.trees = num_trees_val),
+    imputed_datasets = completed_list,
+    plots = plot_list[[i]],
+    pooled_summary = summary_pooled,
+    models = models,
+    elapsed_time_sec = as.numeric(difftime(Sys.time(), start_time, units = "secs"))
+  )
+
+  ##########################################################
+  ### TIMING
+  ##########################################################
+
+  elapsed <- as.numeric(difftime(Sys.time(), start_time, units = "secs"))
+
+  cat("⏱ Elapsed:", round(elapsed, 2), "sec\n")
+  cat("========================================\n")
+}
+
+############################################################
+### 7. COMBINE RESULTS
+############################################################
+
+results_table <- do.call(rbind, lapply(pooled_results, function(res) {
+
+  if (is.null(res)) return(NULL)
+
+  data.frame(
+    num.trees = res$num.trees,
+    term = rownames(res$summary),
+    estimate = res$summary$results,
+    std_error = res$summary$se
+  )
+}))
+
+print(results_table)
+
+############################################################
+### 8. SAVE EVERYTHING
+############################################################
+
+saveRDS(all_results,
+        file = file.path(base_dir, "all_results_minNodeSize10.rds"))
+
+saveRDS(plot_list,
+        file = file.path(base_dir, "plot_list_minNodeSize10.rds"))
+
+############################################################
+### DONE
+############################################################
+
+cat("\n✅ FULL PIPELINE COMPLETE\n")
+```
+
+Min node size 2
+```{r}
+############################################################
+### 0. Libraries
+############################################################
+
+library(dplyr)
+library(miceRanger)
+library(mitools)
+library(parallel)
+
+n_cores <- max(1, detectCores() - 1)
+
+############################################################
+### 1. DATA PREPROCESSING
+############################################################
+
+dfc <- dfc %>%
+  mutate(across(where(is.character), as.factor)) %>%
+  mutate(across(where(is.logical), as.integer))
+
+############################################################
+### 2. DATA SPLIT (NO CONSTANT REMOVAL)
+############################################################
+
+df_model <- dfc
+
+cat("Total variables used:", ncol(df_model), "\n")
+
+############################################################
+### 3. HYPERPARAMETER GRID
+############################################################
+
+grid <- expand.grid(
+  num.trees = c(25, 50, 100)
+)
+
+############################################################
+### 4. OUTPUT STORAGE + FOLDERS
+############################################################
+
+pooled_results <- list()
+all_results <- list()
+plot_list <- list()
+
+base_dir <- "C:/Users/justi/OneDrive/Desktop/Malnutrition_Project/infant_malnutrition_stratification/MICE Imputation Sensitivity analysis min_nodes_size_2/"
+
+out_dir <- file.path(base_dir, "imputed_datasets_min_node_size_2")
+plot_dir <- file.path(base_dir, "model_error_plots_min_node_size_2")
+long_dir <- file.path(base_dir, "imputed_long_format_min_node_size_2")
+
+dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
+dir.create(plot_dir, recursive = TRUE, showWarnings = FALSE)
+dir.create(long_dir, recursive = TRUE, showWarnings = FALSE)
+
+############################################################
+### 5. SAFE PLOTTING FUNCTION
+############################################################
+
+safe_plot <- function(plot_expr, file_path) {
+
+  p <- tryCatch(
+    suppressWarnings(plot_expr),
+    error = function(e) {
+      cat("❌ Plot error:", e$message, "\n")
+      return(NULL)
+    }
+  )
+
+  if (is.null(p)) return(NULL)
+
+  print(p)
+
+  png(file_path, width = 2000, height = 2000)
+  print(p)
+  dev.off()
+
+  return(p)
+}
+
+############################################################
+### 6. LOOP OVER HYPERPARAMETERS
+############################################################
+
+for (i in seq_len(nrow(grid))) {
+
+  num_trees_val <- grid$num.trees[i]
+
+  cat("\n========================================\n")
+  cat("RUN:", i, "/", nrow(grid),
+      "| num.trees =", num_trees_val, "\n")
+
+  start_time <- Sys.time()
+
+  ##########################################################
+  ### IMPUTATION
+  ##########################################################
+
+  imp <- tryCatch({
+
+    miceRanger(
+      data = df_model,
+      m = 5,
+      num.trees = num_trees_val,
+      min.node.size = 2,
+      max.depth = 10,
+      sample.fraction = 0.632,
+      seed = 123,
+      verbose = FALSE,
+      num.threads = n_cores,
+      save.memory = TRUE
+    )
+
+  }, error = function(e) {
+    cat("❌ Imputation error:", e$message, "\n")
+    return(NULL)
+  })
+
+  if (is.null(imp)) next
+
+  ##########################################################
+  ### BASE PATH FOR PLOTS
+  ##########################################################
+
+  plot_prefix <- file.path(
+    plot_dir,
+    paste0("numtrees_", num_trees_val, "_minNodeSize2")
+  )
+
+  ##########################################################
+  ### 1. MODEL ERROR
+  ##########################################################
+
+  model_error_plot <- safe_plot(
+    plotModelError(imp),
+    paste0(plot_prefix, "_model_error_minNodeSize2.png")
+  )
+
+  ##########################################################
+  ### 2. DISTRIBUTIONS
+  ##########################################################
+
+  distributions_plot <- safe_plot(
+    plotDistributions(imp),
+    paste0(plot_prefix, "_distributions_minNodeSize2.png")
+  )
+
+  ##########################################################
+  ### 3. CORRELATIONS
+  ##########################################################
+
+  correlations_plot <- safe_plot(
+    plotCorrelations(imp),
+    paste0(plot_prefix, "_correlations_minNodeSize2.png")
+  )
+
+  ##########################################################
+  ### 4. VARIABLE CONVERGENCE
+  ##########################################################
+
+  var_convergence_plot <- safe_plot(
+    plotVarConvergence(imp),
+    paste0(plot_prefix, "_var_convergence_minNodeSize2.png")
+  )
+
+  ##########################################################
+  ### 5. IMPUTATION VARIANCE
+  ##########################################################
+
+  imputation_variance_plot <- safe_plot(
+    plotImputationVariance(imp),
+    paste0(plot_prefix, "_imputation_variance_minNodeSize2.png")
+  )
+
+  ##########################################################
+  ### STORE PLOTS
+  ##########################################################
+
+  plot_list[[i]] <- list(
+    model_error = model_error_plot,
+    distributions = distributions_plot,
+    correlations = correlations_plot,
+    var_convergence = var_convergence_plot,
+    imputation_variance = imputation_variance_plot
+  )
+
+  cat("📊 Plots saved for num.trees =", num_trees_val, "\n")
+
+  ##########################################################
+  ### EXTRACT IMPUTED DATASETS (WIDE)
+  ##########################################################
+
+  completed_list <- completeData(imp)
+
+  if (!is.list(completed_list)) {
+    completed_list <- list(completed_list)
+  }
+
+  if (length(completed_list) == 0) {
+    cat("❌ No completed datasets returned\n")
+    next
+  }
+
+  ##########################################################
+  ### SAVE WIDE DATASETS
+  ##########################################################
+
+  for (j in seq_along(completed_list)) {
+
+    write.csv(
+      completed_list[[j]],
+      file.path(out_dir,
+                paste0("imputed_numtrees_", num_trees_val,
+                       "_dataset_", j, "_minNodeSize2.csv")),
+      row.names = FALSE
+    )
+  }
+
+  ##########################################################
+  ### EXTRACT LONG FORMAT DATA
+  ##########################################################
+
+  long_data <- tryCatch({
+    completeData(imp, action = "long")
+  }, error = function(e) {
+    cat("❌ Long format extraction error:", e$message, "\n")
+    return(NULL)
+  })
+
+  ##########################################################
+  ### SAVE LONG FORMAT DATA (PER HYPERPARAMETER)
+  ##########################################################
+
+  if (!is.null(long_data)) {
+
+    param_long_dir <- file.path(
+      long_dir,
+      paste0("numtrees_", num_trees_val, "_minNodeSize2")
+    )
+
+    dir.create(param_long_dir, recursive = TRUE, showWarnings = FALSE)
+
+    write.csv(
+      long_data,
+      file.path(
+        param_long_dir,
+        paste0("long_imputed_numtrees_", num_trees_val, "_minNodeSize2.csv")
+      ),
+      row.names = FALSE
+    )
+
+    cat("📄 Long format data saved for num.trees =", num_trees_val, "\n")
+  }
+
+  ##########################################################
+  ### SIMPLE MODEL (SENSITIVITY CHECK)
+  ##########################################################
+
+  vars <- names(df_model)[1:min(5, ncol(df_model))]
+
+  formula <- as.formula(
+    paste(vars[1], "~", paste(vars[-1], collapse = " + "))
+  )
+
+  models <- lapply(completed_list, function(data) {
+    lm(formula, data = data)
+  })
+
+  ##########################################################
+  ### POOL RESULTS
+  ##########################################################
+
+  pooled <- tryCatch({
+    MIcombine(models)
+  }, error = function(e) {
+    cat("❌ Pooling error:", e$message, "\n")
+    return(NULL)
+  })
+
+  if (is.null(pooled)) next
+
+  summary_pooled <- summary(pooled)
+  print(summary_pooled)
+
+  ##########################################################
+  ### STORE RESULTS
+  ##########################################################
+
+  pooled_results[[i]] <- list(
+    num.trees = num_trees_val,
+    summary = summary_pooled
+  )
+
+  all_results[[i]] <- list(
+    params = list(num.trees = num_trees_val),
+    imputed_datasets = completed_list,
+    long_data = long_data,
+    plots = plot_list[[i]],
+    pooled_summary = summary_pooled,
+    models = models,
+    elapsed_time_sec = as.numeric(difftime(Sys.time(), start_time, units = "secs"))
+  )
+
+  ##########################################################
+  ### TIMING
+  ##########################################################
+
+  elapsed <- as.numeric(difftime(Sys.time(), start_time, units = "secs"))
+
+  cat("⏱ Elapsed:", round(elapsed, 2), "sec\n")
+  cat("========================================\n")
+}
+
+############################################################
+### 7. COMBINE RESULTS
+############################################################
+
+results_table <- do.call(rbind, lapply(pooled_results, function(res) {
+
+  if (is.null(res)) return(NULL)
+
+  data.frame(
+    num.trees = res$num.trees,
+    term = rownames(res$summary),
+    estimate = res$summary$results,
+    std_error = res$summary$se
+  )
+}))
+
+print(results_table)
+
+############################################################
+### 8. SAVE EVERYTHING
+############################################################
+
+saveRDS(all_results,
+        file = file.path(base_dir, "all_results_minNodeSize2.rds"))
+
+saveRDS(plot_list,
+        file = file.path(base_dir, "plot_list_minNodeSize2.rds"))
+
+############################################################
+### DONE
+############################################################
+
+cat("\n✅ FULL PIPELINE COMPLETE\n")
+```
