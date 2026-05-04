@@ -1,30 +1,120 @@
 ---
-title: "3.75 India Heatmap"
+title: "3.75 India CIAF Map"
 author: "Justin Guerra"
-date: "2026-04-27"
+date: "2026-05-01"
 output: html_document
 ---
 
-```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = TRUE)
+```{r}
+# =============================
+# 0. Libraries
+# =============================
+library(dplyr)
+library(tidyr)
+library(sf)
+library(ggplot2)
+library(rnaturalearth)
+library(stringr)
+library(here)
+
+# =============================
+# 1. Load data
+# =============================
+dffile <- here(data_folder, "cleaned.rda")
+load(dffile)
+
+# =============================
+# 2. State-level CIAF summary
+# =============================
+state_summary <- df %>%
+  group_by(state_ciaf_rank) %>%
+  summarise(
+    n_total = n(),
+    n_ciaf = sum(ciaf == 1, na.rm = TRUE),
+    n_non_ciaf = sum(ciaf == 0, na.rm = TRUE),
+    ciaf_prevalence = mean(ciaf == 1, na.rm = TRUE)
+  ) %>%
+  ungroup() %>%
+  mutate(prevalence_pct = ciaf_prevalence * 100)
+
+# =============================
+# 3. Clean + standardize state names
+# =============================
+state_summary_clean <- state_summary %>%
+  separate(state_ciaf_rank, into = c("rank", "state"), sep = "\\. ") %>%
+  mutate(
+    rank = as.integer(rank),
+    state = str_squish(state),
+
+    # Harmonize naming across NFHS vs shapefile
+    state = dplyr::recode(state,
+      "Andaman and Nicobar Islands" = "Andaman and Nicobar",
+      "Andaman & Nicobar Islands" = "Andaman and Nicobar",
+
+      "Dadra and Nagar Haveli" = "Dadra and Nagar Haveli and Daman and Diu",
+      "Daman and Diu" = "Dadra and Nagar Haveli and Daman and Diu",
+
+      "Uttaranchal" = "Uttarakhand",
+      "NCT of Delhi" = "Delhi",
+      "Chattisgarh" = "Chhattisgarh",
+
+      "Orissa" = "Odisha",
+      "Odissa" = "Odisha",
+
+      "Lakshwadeep" = "Lakshadweep",
+      
+      "Ladakh" = "Ladakh"   # <- add this
+
+    )
+  )
+
+# =============================
+# 4. Load India shapefile
+# =============================
+india <- rnaturalearth::ne_states(
+  country = "India",
+  returnclass = "sf"
+)
+
+# =============================
+# 5. Merge shapefile + CIAF data
+# =============================
+merged <- india %>%
+  left_join(state_summary_clean, by = c("name" = "state"))
+
+
+# =============================
+# 7. Identify unmatched states
+# =============================
+missing_states <- india %>%
+  anti_join(state_summary_clean, by = c("name" = "state")) %>%
+  select(name)
+
+print(missing_states)
+
+# =============================
+# 8. Final CIAF map
+# =============================
+ggplot(merged) +
+  geom_sf(aes(fill = prevalence_pct), color = "white", size = 0.2) +
+
+  scale_fill_viridis_c(
+    option = "magma",
+    na.value = "grey90",
+    name = "CIAF (%)"
+  ) +
+
+  labs(
+    title = "Child Undernutrition (CIAF) Across Indian States",
+    subtitle = "NFHS-5 (2019–2021)",
+  ) +
+
+  coord_sf(datum = NA) +
+
+  theme_minimal(base_size = 13) +
+  theme(
+    plot.title = element_text(face = "bold"),
+    legend.position = "right"
+  )
 ```
 
-## R Markdown
-
-This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
-
-When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
-
-```{r cars}
-summary(cars)
-```
-
-## Including Plots
-
-You can also embed plots, for example:
-
-```{r pressure, echo=FALSE}
-plot(pressure)
-```
-
-Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
