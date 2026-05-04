@@ -2138,47 +2138,202 @@ df <- df %>%
 ##New code for the state ciaf rank based on the internal haven labelled data of state mapping
 df <- df %>%
   mutate(state_ciaf_rank = case_when(
-state == 20 ~ "1. Jharkhand",
-state == 25 ~ "2. Dadra and Nagar Haveli and Daman and Diu",
-state == 10 ~ "3. Bihar",
-state == 23 ~ "4. Madhya Pradesh",
-state == 9  ~ "5. Uttar Pradesh",
-state == 24 ~ "6. Gujarat",
-state == 29 ~ "7. Karnataka",
-state == 22 ~ "8. Chhattisgarh",
-state == 8  ~ "9. Rajasthan",
-state == 27 ~ "10. Maharashtra",
-state == 17 ~ "11. Meghalaya",
-state == 6  ~ "12. Haryana",
-state == 21 ~ "13. Odisha",
-state == 5  ~ "14. Uttarakhand",
-state == 18 ~ "15. Assam",
-state == 19 ~ "16. West Bengal",
-state == 28 ~ "17. Andhra Pradesh",
-state == 34 ~ "18. Puducherry",
-state == 7  ~ "19. Delhi",
-state == 33 ~ "20. Tamil Nadu",
-state == 25 ~ "21. Dadra and Nagar Haveli and Daman and Diu",  # (replaces Daman & Diu)
-state == 12 ~ "22. Arunachal Pradesh",
-state == 11 ~ "23. Sikkim",
-state == 36 ~ "24. Telangana",
-state == 35 ~ "25. Andaman and Nicobar Islands",
-state == 30 ~ "26. Goa",
-state == 3  ~ "27. Punjab",
-state == 2  ~ "28. Himachal Pradesh",
-state == 16 ~ "29. Tripura",
-state == 31 ~ "30. Lakshadweep",
-state == 1  ~ "31. Jammu and Kashmir",
-state == 4  ~ "32. Chandigarh",
-state == 32 ~ "33. Kerala",
-state == 13 ~ "34. Nagaland",
-state == 14 ~ "35. Manipur",
-state == 15 ~ "36. Mizoram"
-))
+    state == 20 ~ "1. Jharkhand",
+    state == 25 ~ "2. Dadra and Nagar Haveli and Daman and Diu",
+    state == 10 ~ "3. Bihar",
+    state == 23 ~ "4. Madhya Pradesh",
+    state == 9  ~ "5. Uttar Pradesh",
+    state == 24 ~ "6. Gujarat",
+    state == 29 ~ "7. Karnataka",
+    state == 22 ~ "8. Chhattisgarh",
+    state == 8  ~ "9. Rajasthan",
+    state == 27 ~ "10. Maharashtra",
+    state == 17 ~ "11. Meghalaya",
+    state == 6  ~ "12. Haryana",
+    state == 21 ~ "13. Odisha",
+    state == 5  ~ "14. Uttarakhand",
+    state == 18 ~ "15. Assam",
+    state == 19 ~ "16. West Bengal",
+    state == 28 ~ "17. Andhra Pradesh",
+    state == 34 ~ "18. Puducherry",
+    state == 7  ~ "19. Delhi",
+    state == 33 ~ "20. Tamil Nadu",
+    state == 12 ~ "21. Arunachal Pradesh",
+    state == 11 ~ "22. Sikkim",
+    state == 36 ~ "23. Telangana",
+    state == 35 ~ "24. Andaman and Nicobar Islands",
+    state == 30 ~ "25. Goa",
+    state == 3  ~ "26. Punjab",
+    state == 2  ~ "27. Himachal Pradesh",
+    state == 16 ~ "28. Tripura",
+    state == 31 ~ "29. Lakshadweep",
+    state == 1  ~ "30. Jammu and Kashmir",
+    state == 4  ~ "31. Chandigarh",
+    state == 32 ~ "32. Kerala",
+    state == 13 ~ "33. Nagaland",
+    state == 14 ~ "34. Manipur",
+    state == 15 ~ "35. Mizoram",
+    state == 37 ~ "36. Ladakh",   # <- added here
+    TRUE ~ NA_character_
+  ))
+
+## Correct 
+# Labels:
+#  value                                label
+#      1                      jammu & kashmir
+#      2                     himachal pradesh
+#      3                               punjab
+#      4                           chandigarh
+#      5                          uttarakhand
+#      6                              haryana
+#      7                         nct of delhi
+#      8                            rajasthan
+#      9                        uttar pradesh
+#     10                                bihar
+#     11                               sikkim
+#     12                    arunachal pradesh
+#     13                             nagaland
+#     14                              manipur
+#     15                              mizoram
+#     16                              tripura
+#     17                            meghalaya
+#     18                                assam
+#     19                          west bengal
+#     20                            jharkhand
+#     21                               odisha
+#     22                         chhattisgarh
+#     23                       madhya pradesh
+#     24                              gujarat
+#     25 dadra & nagar haveli and daman & diu
+#     27                          maharashtra
+#     28                       andhra pradesh
+#     29                            karnataka
+#     30                                  goa
+#     31                          lakshadweep
+#     32                               kerala
+#     33                           tamil nadu
+#     34                           puducherry
+#     35            andaman & nicobar islands
+#     36                            telangana
+#     37                               ladakh
+
 
 recoded_vars <- append(recoded_vars, "state")
 recoded_vars <- append(recoded_vars, "state_ciaf_rank")
 ```
+
+
+Old & New Mappings 
+```{r}
+old_state_mappings <- df %>%
+  mutate(
+    old_state = hv024 %>% as.numeric(),
+    state_ciaf_rank = case_when(
+      state == 15 ~ "1. Jharkhand",
+      state == 8  ~ "2. Dadra and Nagar Haveli and Daman and Diu",
+      state == 5  ~ "3. Bihar",
+      state == 19 ~ "4. Madhya Pradesh",
+      state == 33 ~ "5. Uttar Pradesh",
+      state == 11 ~ "6. Gujarat",
+      state == 16 ~ "7. Karnataka",
+      state == 7  ~ "8. Chhattisgarh",
+      state == 29 ~ "9. Rajasthan",
+      state == 20 ~ "10. Maharashtra",
+      state == 22 ~ "11. Meghalaya",
+      state == 12 ~ "12. Haryana",
+      state == 26 ~ "13. Odisha",
+      state == 34 ~ "14. Uttarakhand",
+      state == 4  ~ "15. Assam",
+      state == 35 ~ "16. West Bengal",
+      state == 2  ~ "17. Andhra Pradesh",
+      state == 27 ~ "18. Puducherry",
+      state == 25 ~ "19. Delhi",
+      state == 31 ~ "20. Tamil Nadu",
+      state == 9  ~ "21. Dadra and Nagar Haveli and Daman and Diu",  # merged
+      state == 3  ~ "22. Arunachal Pradesh",
+      state == 30 ~ "23. Sikkim",
+      state == 36 ~ "24. Telangana",
+      state == 1  ~ "25. Andaman and Nicobar Islands",
+      state == 10 ~ "26. Goa",
+      state == 28 ~ "27. Punjab",
+      state == 13 ~ "28. Himachal Pradesh",
+      state == 32 ~ "29. Tripura",
+      state == 18 ~ "30. Lakshadweep",
+      state == 14 ~ "31. Jammu and Kashmir",
+      state == 6  ~ "32. Chandigarh",
+      state == 17 ~ "33. Kerala",
+      state == 24 ~ "34. Nagaland",
+      state == 21 ~ "35. Manipur",
+      state == 23 ~ "36. Mizoram",
+      TRUE ~ NA_character_
+    )) %>%
+  dplyr::select(old_state, state_ciaf_rank) %>%
+  distinct(old_state, .keep_all = TRUE)
+
+new_state_mappings <- df %>%
+  mutate(new_state = hv024 %>% as.numeric(),
+         state_ciaf_rank = case_when(
+    state == 20 ~ "1. Jharkhand",
+    state == 25 ~ "2. Dadra and Nagar Haveli and Daman and Diu",
+    state == 10 ~ "3. Bihar",
+    state == 23 ~ "4. Madhya Pradesh",
+    state == 9  ~ "5. Uttar Pradesh",
+    state == 24 ~ "6. Gujarat",
+    state == 29 ~ "7. Karnataka",
+    state == 22 ~ "8. Chhattisgarh",
+    state == 8  ~ "9. Rajasthan",
+    state == 27 ~ "10. Maharashtra",
+    state == 17 ~ "11. Meghalaya",
+    state == 6  ~ "12. Haryana",
+    state == 21 ~ "13. Odisha",
+    state == 5  ~ "14. Uttarakhand",
+    state == 18 ~ "15. Assam",
+    state == 19 ~ "16. West Bengal",
+    state == 28 ~ "17. Andhra Pradesh",
+    state == 34 ~ "18. Puducherry",
+    state == 7  ~ "19. Delhi",
+    state == 33 ~ "20. Tamil Nadu",
+    state == 12 ~ "21. Arunachal Pradesh",
+    state == 11 ~ "22. Sikkim",
+    state == 36 ~ "23. Telangana",
+    state == 35 ~ "24. Andaman and Nicobar Islands",
+    state == 30 ~ "25. Goa",
+    state == 3  ~ "26. Punjab",
+    state == 2  ~ "27. Himachal Pradesh",
+    state == 16 ~ "28. Tripura",
+    state == 31 ~ "29. Lakshadweep",
+    state == 1  ~ "30. Jammu and Kashmir",
+    state == 4  ~ "31. Chandigarh",
+    state == 32 ~ "32. Kerala",
+    state == 13 ~ "33. Nagaland",
+    state == 14 ~ "34. Manipur",
+    state == 15 ~ "35. Mizoram",
+    state == 37 ~ "36. Ladakh",   # <- added here
+    TRUE ~ NA_character_
+  ))  %>% dplyr::select(c("new_state", "state_ciaf_rank")) %>%
+  distinct(new_state, .keep_all = TRUE)
+
+clean_name <- function(x) {
+  sub("^\\d+\\.\\s*", "", x)
+}
+
+old_state_mappings = old_state_mappings %>% 
+  dplyr::mutate(state_ciaf_rank = state_ciaf_rank %>% 
+                  clean_name)
+
+new_state_mappings = new_state_mappings %>% 
+  dplyr::mutate(state_ciaf_rank = state_ciaf_rank %>% 
+                  clean_name) 
+
+
+
+old_new_state_map_table = full_join(old_state_mappings, 
+                                     new_state_mappings, 
+                                     by = "state_ciaf_rank") %>%
+  dplyr::filter(!is.na(state_ciaf_rank))
+```
+
+
 
 
 capture drop state_zones
@@ -2199,14 +2354,40 @@ if ("state_zones" %in% names(df)) {
   df$state_zones <- NULL
 }
 
+#Mapping the old to new state labels
+old_mappings = vector(mode = "list")
+new_mappings = vector(mode = "list")
+
+old_mappings[["North"]] = c(14, 28, 13, 6, 29, 25, 12)
+old_mappings[["North-Eastern"]] = c(4, 3, 21, 22, 23, 24, 32, 30)
+old_mappings[["Central"]] = c(7, 19, 34, 33)
+old_mappings[["Eastern"]] = c(5, 15, 26, 35)
+old_mappings[["Western"]] = c(8, 9, 10, 11, 20)
+old_mappings[["Southern"]] = c(2, 16, 17, 18, 27, 31, 36, 1)
+
+## Mapping to new mappings and making a mental check as well
+for(loc in old_mappings %>% names()){
+  
+  new_mappings[[loc]] = old_new_state_map_table %>% 
+    dplyr::filter(old_state %in% old_mappings[[loc]])
+  
+  print(paste0("------------", loc, "------------"))
+  print(new_mappings[[loc]] %>% dplyr::select(state_ciaf_rank))
+  
+  new_mappings[[loc]] = new_mappings[[loc]] %>% 
+    dplyr::select(new_state) %>% 
+    dplyr::pull()
+  
+}
+
 # Create a new "state_zones" column by recoding the "v024" column
 df$state_zones <- case_when(
-  df$v024 %in% c(14, 28, 13, 6, 29, 25, 12) ~ 2, # North
-  df$v024 %in% c(4, 3, 21, 22, 23, 24, 32, 30) ~ 1, # North-Eastern
-  df$v024 %in% c(7, 19, 34, 33) ~ 3, # Central
-  df$v024 %in% c(5, 15, 26, 35) ~ 4, # Eastern
-  df$v024 %in% c(8, 9, 10, 11, 20) ~ 5, # Western
-  df$v024 %in% c(2, 16, 17, 18, 27, 31, 36, 1) ~ 6 # Southern
+  df$v024 %in% new_mappings[["North"]] ~ 2, # North
+  df$v024 %in% new_mappings[["North-Eastern"]] ~ 1, # North-Eastern
+  df$v024 %in% new_mappings[["Central"]] ~ 3, # Central
+  df$v024 %in% new_mappings[["Eastern"]] ~ 4, # Eastern
+  df$v024 %in% new_mappings[["Western"]] ~ 5, # Western
+  df$v024 %in% new_mappings[["Southern"]] ~ 6 # Southern
 )
 
 # Label the categories of the "state_zones" column
@@ -2228,9 +2409,17 @@ if ("eag_state" %in% names(df)) {
   df$eag_state <- NULL
 }
 
+## Recoding the old state codes to the new ones
+eag_old_state = c(4, 5, 6, 15, 19, 26, 29, 33, 34)
+eag_new_states = old_new_state_map_table %>% 
+    dplyr::filter(old_state %in% eag_old_state) %>% 
+    dplyr::select(state_ciaf_rank) %>% dplyr::pull()
+
+  
+
 # Create a new "eag_state" column by recoding the "state" column
 df$eag_state <- ifelse(
-  df$state %in% c(4, 5, 6, 15, 19, 26, 29, 33, 34),
+  df$state %in% eag_new_states,
   1,
   0
 )
@@ -2256,11 +2445,36 @@ if ("priority_state" %in% names(df)) {
   df$priority_state <- NULL
 }
 
+#Mapping the old to new state labels
+old_mappings = vector(mode = "list")
+new_mappings = vector(mode = "list")
+
+old_mappings[["Normal Focus"]] = c(5, 7, 13, 14, 15, 19, 26, 29, 33, 34)
+old_mappings[["Other Focus_2"]] = c(3, 4, 21, 22, 23, 24, 30, 32)
+old_mappings[["Other Focus_3"]] = c(1, 6, 8, 9, 18, 25, 27)
+
+## Mapping to new mappings and making a mental check as well
+for(loc in old_mappings %>% names()){
+  
+  new_mappings[[loc]] = old_new_state_map_table %>% 
+    dplyr::filter(old_state %in% old_mappings[[loc]])
+  
+  print(paste0("------------", loc, "------------"))
+  old_new_state_map_table %>% 
+          dplyr::filter(old_state %in% old_mappings[[loc]]) %>% print()
+
+  
+  new_mappings[[loc]] = new_mappings[[loc]] %>% 
+    dplyr::select(new_state) %>% 
+    dplyr::pull()
+  
+}
+
 # Generate priority_state variable
 df$priority_state <- 1
-df$priority_state[df$state %in% c(5, 7, 13, 14, 15, 19, 26, 29, 33, 34)] <- 0
-df$priority_state[df$state %in% c(3, 4, 21, 22, 23, 24, 30, 32)] <- 2
-df$priority_state[df$state %in% c(1, 6, 8, 9, 18, 25, 27)] <- 3
+df$priority_state[df$state %in% priority_old_mappings[["Normal Focus"]]] <- 0
+df$priority_state[df$state %in% priority_old_mappings[["Other Focus_2"]]] <- 2
+df$priority_state[df$state %in% priority_old_mappings[["Other Focus_3"]]] <- 3
 
 # Recode priority_state
 df$priority_state_bin <- case_when(
