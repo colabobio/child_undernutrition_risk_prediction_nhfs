@@ -1,0 +1,219 @@
+---
+title: "6.5 Feature Selection Imputed"
+author: "Justin Guerra"
+date: "2026-05-04"
+output: html_document
+---
+
+```{r}
+
+library(glmnet)
+library(caret)
+library(dplyr)
+library(foreach)
+library(doParallel)
+library(properties)
+
+# =============================
+# 0. Paths
+# =============================
+prop <- read.properties("data.properties")
+data_folder <- prop$data_folder
+
+base_output <- "C:/Users/justi/OneDrive/Desktop/feature-selection"
+dir.create(base_output, recursive = TRUE, showWarnings = FALSE)
+
+impute_path <- "C:/Users/justi/OneDrive/Desktop/Malnutrition_Project/infant_malnutrition_stratification/MICE Imputation Sensitivity analysis min_node_size_5/imputed_datasets"
+
+files <- list.files(impute_path, pattern = "\\.csv$", full.names = TRUE)
+
+# =============================
+# PARALLEL SETUP
+# =============================
+n_cores <- max(1, parallel::detectCores() - 2)
+cl <- makeCluster(n_cores)
+registerDoParallel(cl)
+
+# =============================
+# LOOP OVER IMPUTATIONS (PARALLEL)
+# =============================
+results <- foreach(i = seq_along(files),
+                   .packages = c("glmnet", "caret", "dplyr")) %dopar% {
+  
+  cat("Running imputation:", i, "\n")
+  
+  # ----------------------------
+  # Load dataset
+  # ----------------------------
+  df <- read.csv(files[i], stringsAsFactors = FALSE)
+  
+  mdl_folder_i <- file.path(base_output, paste0("imp_", i))
+  dir.create(mdl_folder_i, recursive = TRUE, showWarnings = FALSE)
+  
+  # =============================
+  # 1. Prepare predictors
+  # =============================
+  if (!"ciaf" %in% names(df)) {
+    stop(paste("ciaf column not found in file:", files[i]))
+  }
+  
+  response <- df$ciaf
+  predictors <- df %>% dplyr::select(-ciaf)
+  
+  predictors <- predictors %>% mutate(across(everything(), as.numeric))
+  
+  predictors <- predictors %>%
+    mutate(across(everything(), ~ ifelse(is.na(.), mean(., na.rm = TRUE), .)))
+  
+  predictors <- predictors %>% select_if(~ var(.) != 0)
+  
+  writeLines(colnames(predictors),
+             file.path(mdl_folder_i, "all_predictor_names.txt"))
+  
+  # =============================
+  # 2. Correlation check
+  # =============================
+  cor_threshold <- 0.5
+  cmat <- cor(predictors)
+  
+  cor_df <- as.data.frame(as.table(cmat))
+  
+  high_cor_pairs <- cor_df %>%
+    filter(abs(Freq) > cor_threshold & Var1 != Var2) %>%
+    arrange(desc(abs(Freq)))
+  
+  write.csv(high_cor_pairs,
+            file.path(mdl_folder_i, "all_predictor_cor.csv"),
+            row.names = FALSE)
+  
+  # =============================
+  # 3. Remove redundant variables
+  # =============================
+  redvar_file <- file.path(base_output, "redundant_predictors.txt")
+  
+  if (file.exists(redvar_file)) {
+    redundant_vars <- readLines(redvar_file)
+    predictors <- predictors %>% dplyr::select(-any_of(redundant_vars))
+  }
+  
+  # =============================
+  # 4. Split data
+  # =============================
+  set.seed(2387)
+  
+  predictors_matrix <- as.matrix(predictors)
+  
+  sel_index <- createDataPartition(response, p = 0.34, list = FALSE)
+  
+  remaining_index <- setdiff(seq_along(response), sel_index)
+  
+  train_index <- createDataPartition(response[remaining_index], p = 0.5, list = FALSE)
+  train_index <- remaining_index[train_index]
+  test_index <- setdiff(remaining_index, train_index)
+  
+  sel_predictors <- predictors_matrix[sel_index, ]
+  train_predictors <- predictors_matrix[train_index, ]
+  test_predictors <- predictors_matrix[test_index, ]
+  
+  sel_response <- response[sel_index]
+  train_response <- response[train_index]
+  test_response <- response[test_index]
+  
+  # =============================
+  # 5. LASSO feature selection
+  # =============================
+  sel_predictors <- scale(sel_predictors)
+  
+  lasso_model <- cv.glmnet(sel_predictors, sel_response,
+                           alpha = 1,
+                           family = "binomial",
+                           nfolds = 5)
+  
+  best_lambda <- lasso_model$lambda.min
+  coefficients <- coef(lasso_model, s = best_lambda)
+  
+  selected_features <- rownames(coefficients)[as.vector(coefficients != 0)]
+  selected_features <- setdiff(selected_features, "(Intercept)")
+  
+  writeLines(selected_features,
+             file.path(mdl_folder_i, "sel_predictor_names.txt"))
+  
+  # =============================
+  # 6. Train model
+  # =============================
+  selected_train_predictors <- train_predictors[, selected_features, drop = FALSE]
+  
+  train_model <- glmnet(selected_train_predictors,
+                        train_response,
+                        alpha = 1,
+                        lambda = best_lambda,
+                        family = "binomial")
+  
+  coef_matrix <- coef(train_model)
+  
+  coef_df <- as.data.frame(as.matrix(coef_matrix))
+  coef_df <- cbind(Variable = rownames(coef_df), coef_df)
+  colnames(coef_df)[2] <- "Coefficient"
+  
+  write.csv(coef_df,
+            file.path(mdl_folder_i, "new_model_coeff.csv"),
+            row.names = FALSE)
+  
+  # =============================
+  # 7. GLM refit for CI
+  # =============================
+  selected <- rownames(coef_matrix)[as.vector(coef_matrix != 0)]
+  selected <- setdiff(selected, "(Intercept)")
+  
+  train_model_selected <- selected_train_predictors[, selected, drop = FALSE]
+  
+  glm_fit <- glm(train_response ~ .,
+                 data = as.data.frame(train_model_selected),
+                 family = "binomial")
+  
+  confidence_intervals <- confint(glm_fit)
+  
+  write.csv(confidence_intervals,
+            file.path(mdl_folder_i, "new_confidence_intervals.csv"),
+            row.names = TRUE)
+  
+  # =============================
+  # 8. Save objects
+  # =============================
+  save(train_model,
+       file = file.path(mdl_folder_i, "train_model.rda"))
+  
+  save(test_predictors,
+       file = file.path(mdl_folder_i, "test_predictors.rda"))
+  
+  save(test_response,
+       file = file.path(mdl_folder_i, "test_response.rda"))
+  
+  # =============================
+  # 9. Save CSVs
+  # =============================
+  write.csv(as.data.frame(selected_train_predictors),
+            file.path(mdl_folder_i, "train_predictors.csv"),
+            row.names = FALSE)
+  
+  write.csv(data.frame(train_response = train_response),
+            file.path(mdl_folder_i, "train_response.csv"),
+            row.names = FALSE)
+  
+  selected_test_predictors <- test_predictors[, selected_features, drop = FALSE]
+  
+  write.csv(as.data.frame(selected_test_predictors),
+            file.path(mdl_folder_i, "test_predictors.csv"),
+            row.names = FALSE)
+  
+  write.csv(data.frame(test_response = test_response),
+            file.path(mdl_folder_i, "test_response.csv"),
+            row.names = FALSE)
+}
+
+# =============================
+# CLEAN UP
+# =============================
+stopCluster(cl)
+```
+
