@@ -95,7 +95,7 @@ print(missing_states)
 # =============================
 # 8. Final CIAF map
 # =============================
-ggplot(merged) +
+p = ggplot(merged) +
   geom_sf(aes(fill = prevalence_pct), color = "white", size = 0.2) +
 
   scale_fill_viridis_c(
@@ -116,5 +116,13 @@ ggplot(merged) +
     plot.title = element_text(face = "bold"),
     legend.position = "right"
   )
+
+ggsave(
+  filename = "C:/Users/justi/OneDrive/Desktop/Malnutrition_Project/infant_malnutrition_stratification/Patient Characteristics/CIAF_map.png",
+  plot = p,
+  width = 10,
+  height = 7,
+  dpi = 300
+)
 ```
 

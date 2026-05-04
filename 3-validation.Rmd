@@ -12,6 +12,7 @@ https://www.techtips.surveydesign.com.au/post/the-recode-command
 
 
 ```{r setup, include=FALSE}
+library(here) 
 library(Hmisc)
 library(rms)
 library(glmnet)
