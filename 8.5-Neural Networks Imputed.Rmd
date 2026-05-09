@@ -1,0 +1,164 @@
+---
+title: "8.5-Neural Networks Imputed"
+author: "Justin Guerra"
+date: "2026-05-05"
+output: html_document
+---
+
+```{r}
+library(readr)
+library(dplyr)
+library(keras)
+library(tensorflow)
+library(pROC)
+
+# =============================
+# Base directory
+# =============================
+base_path <- "C:/Users/justi/OneDrive/Desktop/feature-selection/min_node_size_5"
+
+# =============================
+# Output directory
+# =============================
+output_path <- "C:/Users/justi/OneDrive/Desktop/ML-results"
+dir.create(output_path, recursive = TRUE, showWarnings = FALSE)
+
+results <- list()
+
+# =============================
+# Loop through imp_1 → imp_15
+# =============================
+for (i in 1:15) {
+
+  cat("\n========== Running imp_", i, " ==========\n")
+
+  model_path <- file.path(base_path, paste0("imp_", i))
+
+  # -------------------------
+  # Load data
+  # -------------------------
+  X_train <- read_csv(file.path(model_path, "train_predictors.csv"), show_col_types = FALSE)
+  y_train <- read_csv(file.path(model_path, "train_response.csv"), show_col_types = FALSE)[[1]]
+
+  X_test <- read_csv(file.path(model_path, "test_predictors.csv"), show_col_types = FALSE)
+  y_test <- read_csv(file.path(model_path, "test_response.csv"), show_col_types = FALSE)[[1]]
+
+  X_train <- as.matrix(X_train)
+  X_test <- as.matrix(X_test)
+
+  # -------------------------
+  # Scaling
+  # -------------------------
+  train_mean <- apply(X_train, 2, mean)
+  train_sd <- apply(X_train, 2, sd)
+
+  X_train <- scale(X_train, center = train_mean, scale = train_sd)
+  X_test <- scale(X_test, center = train_mean, scale = train_sd)
+
+  nfeat <- ncol(X_train)
+
+  # -------------------------
+  # Model
+  # -------------------------
+  model <- keras_model_sequential() %>%
+    layer_input(shape = nfeat) %>%
+
+    layer_dense(units = nfeat, kernel_regularizer = regularizer_l2(0.001)) %>%
+    layer_activation_leaky_relu(alpha = 0.01) %>%
+    layer_batch_normalization() %>%
+    layer_dropout(rate = 0.5) %>%
+
+    layer_dense(units = floor(nfeat / 2), kernel_regularizer = regularizer_l2(0.001)) %>%
+    layer_activation_leaky_relu(alpha = 0.01) %>%
+    layer_batch_normalization() %>%
+    layer_dropout(rate = 0.5) %>%
+
+    layer_dense(units = floor(nfeat / 4), kernel_regularizer = regularizer_l2(0.001)) %>%
+    layer_activation_leaky_relu(alpha = 0.01) %>%
+    layer_batch_normalization() %>%
+    layer_dropout(rate = 0.5) %>%
+
+    layer_dense(units = 1, activation = "sigmoid")
+
+  model %>% compile(
+    optimizer = "adam",
+    loss = "binary_crossentropy",
+    metrics = c("accuracy")
+  )
+
+  # -------------------------
+  # Train
+  # -------------------------
+  history <- model %>% fit(
+    X_train, y_train,
+    epochs = 100,
+    batch_size = 32,
+    validation_split = 0.2,
+    verbose = 0
+  )
+
+  # -------------------------
+  # Evaluate
+  # -------------------------
+  eval <- model %>% evaluate(X_test, y_test, verbose = 0)
+
+  y_pred_prob <- model %>% predict(X_test)
+  y_pred <- ifelse(y_pred_prob > 0.5, 1, 0)
+
+  roc_obj <- roc(y_test, as.vector(y_pred_prob))
+  roc_auc <- auc(roc_obj)
+
+  cat("Test Accuracy:", eval["accuracy"], "\n")
+  cat("ROC-AUC:", roc_auc, "\n")
+
+  # -------------------------
+  # Store results (in-memory)
+  # -------------------------
+  res_i <- data.frame(
+    dataset = paste0("imp_", i),
+    accuracy = as.numeric(eval["accuracy"]),
+    roc_auc = as.numeric(roc_auc)
+  )
+
+  results[[i]] <- res_i
+
+  # -------------------------
+  # Save per-iteration results (FIXED VERSION)
+  # -------------------------
+  write.csv(
+    data.frame(
+      dataset = paste0("imp_", i),
+      accuracy = as.numeric(eval["accuracy"]),
+      roc_auc = as.numeric(roc_auc)
+    ),
+    file.path(output_path, paste0("imp_", i, "_results.csv")),
+    row.names = FALSE
+  )
+
+  # -------------------------
+  # ROC Curve
+  # -------------------------
+  plot(roc_obj, main = paste("ROC Curve - imp_", i))
+  abline(a = 0, b = 1, lty = 2)
+}
+
+# =============================
+# Final summary
+# =============================
+results_df <- bind_rows(results)
+
+cat("\n===== Overall Results =====\n")
+print(results_df)
+
+cat("\nMean Accuracy:", mean(results_df$accuracy), "\n")
+cat("Mean ROC-AUC:", mean(results_df$roc_auc), "\n")
+
+# =============================
+# Save final combined results
+# =============================
+write.csv(
+  results_df,
+  file.path(output_path, "nn_results_imp_1_to_15.csv"),
+  row.names = FALSE
+)
+```

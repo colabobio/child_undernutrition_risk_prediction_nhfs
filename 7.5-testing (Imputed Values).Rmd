@@ -1,0 +1,180 @@
+---
+title: "7.5-testing (Imputed Values)"
+author: "Justin Guerra"
+date: "2026-05-05"
+output: html_document
+---
+
+```{r}
+# =============================
+# 0. Libraries
+# =============================
+library(magrittr)
+library(here) 
+library(glmnet)
+library(dplyr)
+library(caret)
+library(pROC)
+library(properties)
+library(ResourceSelection)
+library(rms)   # <-- ADDED
+
+# =============================
+# 1. Load helper functions
+# =============================
+source('C:/Users/justi/OneDrive/Desktop/Malnutrition_Project/infant_malnutrition_stratification/mdl-evaluation.R')
+
+# =============================
+# 2. Paths
+# =============================
+prop <- read.properties("C:/Users/justi/OneDrive/Desktop/Malnutrition_Project/infant_malnutrition_stratification/data.properties")
+data_folder <- prop$data_folder
+output_folder <- prop$output_folder
+
+base_imp_path <- "C:/Users/justi/OneDrive/Desktop/feature-selection/min_node_size_2/"
+
+# =============================
+# 3. Helper
+# =============================
+calc_log_odds <- function(probs) {
+  log(probs / (1 - probs))
+}
+
+# =============================
+# 4. Loop over actual folders
+# =============================
+imp_folders <- list.dirs(base_imp_path, full.names = TRUE, recursive = FALSE)
+
+for (mdl_folder in imp_folders) {
+  
+  folder_name <- basename(mdl_folder)
+  
+  cat("\n=============================\n")
+  cat("Processing", folder_name, "\n")
+  cat("=============================\n")
+  
+  # -----------------------------
+  # Load data
+  # -----------------------------
+  load(file = file.path(mdl_folder, "train_model.rda"))
+  load(file = file.path(mdl_folder, "test_predictors.rda"))
+  load(file = file.path(mdl_folder, "test_response.rda"))
+  
+  selected_features <- readLines(file.path(mdl_folder, "sel_predictor_names.txt"))
+  
+  # -----------------------------
+  # Prediction pipeline
+  # -----------------------------
+  selected_test_predictors <- test_predictors[, selected_features, drop = FALSE]
+  
+  test_predictions <- predict(train_model, newx = selected_test_predictors, type = "response")
+  test_probs <- as.numeric(test_predictions[, 1])
+  
+  test_log_odds <- calc_log_odds(test_probs)
+  
+  test_data <- data.frame(
+    out = test_response,
+    logodds = test_log_odds,
+    prob = test_probs
+  )
+  
+  # -----------------------------
+  # Output directory
+  # -----------------------------
+  out_dir <- file.path(mdl_folder, "evaluation")
+  dir.create(out_dir, showWarnings = FALSE, recursive = TRUE)
+  
+  # =============================
+  # 5. Calibration + ROC
+  # =============================
+  cal_plot(
+    model = NULL,
+    test_data,
+    "prob",
+    model_label = folder_name,
+    dir = out_dir,
+    fn = paste0("cal_plot_", folder_name, ".pdf")
+  )
+  
+  cal_c0 <- cal_coeff(
+    test_data,
+    "prob",
+    out_dir,
+    paste0("cal_plot_coefficients_", folder_name, ".txt")
+  )
+  
+  print(cal_c0)
+  
+  # =============================
+  # 5b. Brier Score + Calibration (PROPER)
+  # =============================
+  val <- rms::val.prob(test_probs, test_response, m = 10)
+  
+  brier <- val["Brier"]
+  cal_intercept <- val["Intercept"]
+  cal_slope <- val["Slope"]
+  
+  cat("\n--- Proper Calibration Metrics ---\n")
+  cat("Brier Score:", brier, "\n")
+  cat("Calibration Intercept:", cal_intercept, "\n")
+  cat("Calibration Slope:", cal_slope, "\n")
+  
+  # Save to file
+  sink(file.path(out_dir, paste0("calibration_metrics_", folder_name, ".txt")))
+  cat("Brier Score:", brier, "\n")
+  cat("Calibration Intercept:", cal_intercept, "\n")
+  cat("Calibration Slope:", cal_slope, "\n")
+  sink()
+  
+  # =============================
+  # 5c. ROC Curve
+  # =============================
+  roc_plot(
+    test_response,
+    test_probs,
+    dir = out_dir,
+    fn = paste0("roc_plot_", folder_name, ".pdf")
+  )
+  
+  # =============================
+  # 6. ROC performance
+  # =============================
+  plot_roc_perf(test_data$out, test_data$prob)
+  
+  # =============================
+  # 7. Confusion matrix
+  # =============================
+  conf_matrix(
+    test_data$out,
+    test_data$prob,
+    0.5,
+    out_dir,
+    paste0("conf_matrix_", folder_name, ".txt")
+  )
+  
+  # =============================
+  # 8. Hosmer-Lemeshow test
+  # =============================
+  hosmerlem <- hoslem.test(test_response, test_probs, g = 10)
+  
+  hl_table <- data.frame(
+    Group = 1:10,
+    Observed = hosmerlem$observed[, 2],
+    Expected = hosmerlem$expected[, 2],
+    Observed_Positive = hosmerlem$observed[, 2],
+    Expected_Positive = hosmerlem$expected[, 2]
+  )
+  
+  hl_table$Observed_Percentage <- (hl_table$Observed_Positive / sum(hl_table$Observed_Positive)) * 100
+  hl_table$Expected_Percentage <- (hl_table$Expected_Positive / sum(hl_table$Expected_Positive)) * 100
+  
+  print(hl_table)
+  
+  write.csv(
+    hl_table,
+    file = file.path(out_dir, paste0("hl_table_", folder_name, ".csv")),
+    row.names = FALSE
+  )
+}
+```
+

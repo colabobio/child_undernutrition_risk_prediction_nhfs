@@ -2413,7 +2413,7 @@ if ("eag_state" %in% names(df)) {
 eag_old_state = c(4, 5, 6, 15, 19, 26, 29, 33, 34)
 eag_new_states = old_new_state_map_table %>% 
     dplyr::filter(old_state %in% eag_old_state) %>% 
-    dplyr::select(state_ciaf_rank) %>% dplyr::pull()
+    dplyr::select(new_state) %>% dplyr::pull()
 
   
 
@@ -2472,9 +2472,9 @@ for(loc in old_mappings %>% names()){
 
 # Generate priority_state variable
 df$priority_state <- 1
-df$priority_state[df$state %in% priority_old_mappings[["Normal Focus"]]] <- 0
-df$priority_state[df$state %in% priority_old_mappings[["Other Focus_2"]]] <- 2
-df$priority_state[df$state %in% priority_old_mappings[["Other Focus_3"]]] <- 3
+df$priority_state[df$state %in% new_mappings[["Normal Focus"]]] <- 0
+df$priority_state[df$state %in% new_mappings[["Other Focus_2"]]] <- 2
+df$priority_state[df$state %in% new_mappings[["Other Focus_3"]]] <- 3
 
 # Recode priority_state
 df$priority_state_bin <- case_when(

@@ -6,7 +6,6 @@ output: html_document
 ---
 
 ```{r}
-
 library(glmnet)
 library(caret)
 library(dplyr)
@@ -20,10 +19,10 @@ library(properties)
 prop <- read.properties("data.properties")
 data_folder <- prop$data_folder
 
-base_output <- "C:/Users/justi/OneDrive/Desktop/feature-selection"
+base_output <- "C:/Users/justi/OneDrive/Desktop/feature-selection/min_node_size_2/"
 dir.create(base_output, recursive = TRUE, showWarnings = FALSE)
 
-impute_path <- "C:/Users/justi/OneDrive/Desktop/Malnutrition_Project/infant_malnutrition_stratification/MICE Imputation Sensitivity analysis min_node_size_5/imputed_datasets"
+impute_path <- "C:/Users/justi/OneDrive/Desktop/Malnutrition_Project/infant_malnutrition_stratification/MICE Imputation Sensitivity analysis min_nodes_size_2/imputed_datasets_min_node_size_2/"
 
 files <- list.files(impute_path, pattern = "\\.csv$", full.names = TRUE)
 
@@ -47,7 +46,13 @@ results <- foreach(i = seq_along(files),
   # ----------------------------
   df <- read.csv(files[i], stringsAsFactors = FALSE)
   
-  mdl_folder_i <- file.path(base_output, paste0("imp_", i))
+  # =============================
+  # FOLDER NAME BASED ON FILE NAME
+  # =============================
+  file_id <- tools::file_path_sans_ext(basename(files[i]))
+  file_id <- gsub("[^[:alnum:]_\\-]", "_", file_id)  # safety cleanup
+  
+  mdl_folder_i <- file.path(base_output, file_id)
   dir.create(mdl_folder_i, recursive = TRUE, showWarnings = FALSE)
   
   # =============================

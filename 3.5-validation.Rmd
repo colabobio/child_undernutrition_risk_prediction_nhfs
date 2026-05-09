@@ -12,6 +12,7 @@ https://www.techtips.surveydesign.com.au/post/the-recode-command
 
 
 ```{r setup, include=FALSE}
+library(here)
 library(Hmisc)
 library(rms)
 library(glmnet)
@@ -23,7 +24,7 @@ library(pROC)
 library(ggplot2)
 library(properties)
 library(ResourceSelection)
-library(CalibrationCurves)
+#library(CalibrationCurves)
 ```
 
 ```{r message=FALSE, cache=F}
